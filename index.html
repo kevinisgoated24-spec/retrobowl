@@ -81,8 +81,6 @@
         /* never let the page stretch it (e.g. in fullscreen): the game sizes it itself, and taps rely on that */
         width: auto !important; height: auto !important; }
       #rbA input, #rbA select, #rbA textarea { -webkit-user-select: text; user-select: text; touch-action: manipulation; }
-      /* PWA orientation-change black screen fix — force GPU repaint */
-      @media screen { html { -webkit-transform: translateZ(0); } }
       /* "turn your phone" screen, only on touch screens held upright */
       #rbTurn { display: none; position: fixed; inset: 0; z-index: 2147483500; background: #2c68ff; color: #fff;
         flex-direction: column; align-items: center; justify-content: center; gap: 22px; text-align: center; padding: 24px;
@@ -94,8 +92,6 @@
       #rbTurn button { margin-top: 6px; font: inherit; font-size: 12px; color: #fff; background: none; border: 2px solid #fff; padding: 8px 14px; }
       @keyframes rbTurn { 0%, 20% { transform: rotate(0); } 55%, 80% { transform: rotate(-90deg); } 100% { transform: rotate(0); } }
       @media (orientation: portrait) and (pointer: coarse) { body:not(.rb-upright) #rbTurn { display: flex; } }
-      /* PWA: force canvas container to stay fully painted during rotation */
-      #gm4html5_div_id { will-change: transform; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
       /* phones: one-time tip for playing full screen from the home screen */
       #rbIos { position: fixed; left: 50%; top: 10px; transform: translateX(-50%); z-index: 2147483300; display: none; align-items: center; gap: 10px;
         max-width: calc(100% - 20px); padding: 8px 10px 8px 14px; background: #2c68ff; color: #fff; border: 2px solid #fff; box-shadow: 3px 3px 0 #0b1f6b;
@@ -139,17 +135,11 @@
       <div class="bar"><i></i></div>
     </div>
     <script>
-      /* Fade out the loading screen once the game OR the "turn your phone" screen is ready */
-      (function () {
-        function hideLoad() {
-          var l = document.getElementById("rbLoad");
-          if (!l) return;
-          l.classList.add("out");
-          setTimeout(function () { if (l.parentNode) l.parentNode.removeChild(l); }, 700);
-        }
-        // Always hide after 3s max (up from 2s) so the bar animation finishes
-        setTimeout(hideLoad, 3000);
-      })();
+      setTimeout(function () {
+        var l = document.getElementById("rbLoad");
+        l.classList.add("out");
+        setTimeout(function () { l.remove(); }, 700);
+      }, 2000);
     </script>
     <div id="rbTurn" role="dialog" aria-label="Turn your device">
       <div class="ph"></div>
@@ -183,56 +173,6 @@
       document.write('<script src="rb-admin.js?v=' + Date.now() + '"><\/script>');
     </script>
     <script>
-      /* Orientation / black-screen fix.
-         Problems this solves:
-         1. iOS may not apply the CSS portrait-media-query in time, leaving body black
-            after the loading screen fades.
-         2. When the game is running and the user rotates, GameMaker's WebGL context is
-            lost and can't recover — only a reload fixes it.
-         Both are handled below with JS, not CSS alone. */
-      (function () {
-        window.__rbGameStarted = false; // set to true in start() below
-
-        /* --- Part 1: show the "turn your phone" prompt via JS (belt+suspenders) --- */
-        function maybeShowTurn() {
-          var portrait = window.innerHeight > window.innerWidth;
-          var body = document.body;
-          var el = document.getElementById("rbTurn");
-          if (!el || !body) return;
-          if (portrait && !body.classList.contains("rb-upright") && !window.__rbGameStarted) {
-            el.style.display = "flex";
-          } else {
-            el.style.removeProperty("display"); // let CSS take over
-          }
-        }
-
-        /* --- Part 2: reload on rotation once game is actually running --- */
-        // Blue cover to hide the black WebGL flash before reload
-        var cover = document.createElement("div");
-        cover.style.cssText = "display:none;position:fixed;inset:0;z-index:2147483647;background:#2c68ff;align-items:center;justify-content:center;font-family:'Silkscreen','Courier New',monospace;color:#fff;font-size:5vmin;";
-        cover.textContent = "Loading…";
-        document.documentElement.appendChild(cover);
-
-        var lastOrient = window.innerHeight > window.innerWidth ? "port" : "land";
-
-        function checkRotate() {
-          var now = window.innerHeight > window.innerWidth ? "port" : "land";
-          maybeShowTurn();
-          if (now === lastOrient) return;
-          lastOrient = now;
-          if (!window.__rbGameStarted) return;
-          cover.style.display = "flex";
-          setTimeout(function () { location.reload(); }, 400);
-        }
-
-        window.addEventListener("orientationchange", function () { setTimeout(checkRotate, 100); });
-        window.addEventListener("resize", function () { setTimeout(checkRotate, 100); });
-
-        // Run once after load to handle initial portrait state
-        window.addEventListener("load", function () { setTimeout(maybeShowTurn, 100); });
-      })();
-    </script>
-    <script>
       /* Starting the game:
          - computers: straight away
          - phones/tablets held upright: wait until turned sideways (or "Play upright anyway"),
@@ -241,16 +181,276 @@
            the game then opens like an app with no browser bars. The browser's own
            fullscreen mode isn't used because this game misplaces taps in it.
            Phones get a one-time tip explaining how. */
+      /* ---- debug logger: tap the top-left corner 3x to see the log ---- */
+      window._rbLog = [];
+      window._rb = function(msg) {
+        var t = (Date.now() % 100000);
+        window._rbLog.push("[" + t + "] " + msg);
+        try { console.log("[RB] " + msg); } catch(e){}
+        var el = document.getElementById("_rbDbg");
+        if (el) el.textContent = window._rbLog.slice(-20).join("\n");
+      };
+      (function(){
+        var taps = 0, last = 0;
+        document.addEventListener("touchend", function(e) {
+          var x = e.changedTouches[0].clientX, y = e.changedTouches[0].clientY;
+          if (x < 60 && y < 60) {
+            var now = Date.now();
+            if (now - last < 600) taps++; else taps = 1;
+            last = now;
+            if (taps >= 3) {
+              var el = document.getElementById("_rbDbg");
+              if (!el) {
+                el = document.createElement("pre");
+                el.id = "_rbDbg";
+                el.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:9999999999;background:rgba(0,0,0,.85);color:#0f0;font:9px monospace;padding:4px;max-height:50vh;overflow:auto;white-space:pre-wrap;pointer-events:none;";
+                document.body.appendChild(el);
+              }
+              el.style.display = el.style.display === "none" ? "block" : "block";
+              el.textContent = window._rbLog.slice(-40).join("\n");
+              taps = 0;
+            }
+          }
+        }, true);
+      })();
+      /* ---- file handle guard: GM file API throws when handle=-1 (no save data yet) ---- */
+      (function patchFileHandles() {
+        /* _dA = file_text_read_string, _eA = file_text_readln → return "" on bad handle */
+        ['_dA', '_eA'].forEach(function(fn) {
+          var orig = window[fn];
+          if (typeof orig === 'function') {
+            window[fn] = function() {
+              try { return orig.apply(this, arguments); } catch(e) { return ""; }
+            };
+          }
+        });
+        /* _kA = file_text_close, _Yb1 = file_text_write_string → no-op on bad handle */
+        ['_kA', '_Yb1'].forEach(function(fn) {
+          var orig = window[fn];
+          if (typeof orig === 'function') {
+            window[fn] = function() {
+              try { return orig.apply(this, arguments); } catch(e) { return; }
+            };
+          }
+        });
+        /* _fA = file_text_eof → return true (pretend EOF) on bad handle */
+        var _orig_fA = window._fA;
+        if (typeof _orig_fA === 'function') {
+          window._fA = function() {
+            try { return _orig_fA.apply(this, arguments); } catch(e) { return true; }
+          };
+        }
+        /* _aA = file_text_open_read → return valid empty-file handle instead of -1
+           When no save data exists, _aA returns -1. Downstream code then calls _dA(-1)
+           which reads an empty string, which becomes 0 when coerced to number, which gets
+           passed as an array reference → _im throws. Fix: return a real _Tn3 object with
+           empty content so _fA returns true (EOF) immediately on the first check. */
+        var _orig_aA = window._aA;
+        if (typeof _orig_aA === 'function') {
+          window._aA = function() {
+            var result = _orig_aA.apply(this, arguments);
+            var handle = (typeof yyGetInt32 === 'function') ? yyGetInt32(result) : result;
+            if (handle === -1) {
+              try {
+                var emptyFile = new _Tn3();
+                emptyFile._Un3 = "";   /* empty content → _fA sees length 0 → EOF=true */
+                emptyFile._Vn3 = 0;   /* read position */
+                emptyFile._Yn3 = (arguments[0] !== undefined ? arguments[0] : "");
+                var newHandle = _2o3._A73(emptyFile);
+                _rb("_aA: missing file → empty handle " + newHandle);
+                return newHandle;
+              } catch(e) {
+                _rb("_aA empty-handle fallback threw: " + e + " returning orig -1");
+                return result;
+              }
+            }
+            return result;
+          };
+        }
+        /* _im = array bounds validator → guard non-array instead of throwing
+           GM compiled code calls _im(index, array) before every array access.
+           When a file read returns "" which becomes 0 (number), it gets passed as
+           the array arg → _im throws "trying to index variable which is not an array".
+           Fix: return index clamped to 0 instead of throwing, so the loop can continue. */
+        var _orig_im = window._im;
+        if (typeof _orig_im === 'function') {
+          window._im = function(_dC3, _ms3) {
+            if (!(_ms3 instanceof Array)) {
+              _rb("_im: non-array guard idx=" + _dC3 + " type=" + typeof _ms3);
+              return 0; /* safe fallback index */
+            }
+            return _orig_im.apply(this, arguments);
+          };
+        }
+        _rb("fileHandleGuard: patched _dA _eA _kA _Yb1 _fA _aA _im");
+      })();
       window.onload = function () {
+        _rb("onload fired, protocol=" + location.protocol + " isSecure=" + window.isSecureContext);
         var started = false, body = document.body;
-        function start() { if (started) return; started = true; GameMaker_Init(); window.__rbGameStarted = true; if (touch) tip(); }
+        function start() {
+          if (started) return; started = true;
+          _rb("calling GameMaker_Init");
+          try {
+            GameMaker_Init();
+            _rb("GameMaker_Init done");
+            /* --- Canvas viewport fitter (portrait/upright mode) ---
+               GM sets canvas.width/height to native resolution (e.g. 960x540 landscape).
+               When running in portrait the canvas overflows the viewport on the right.
+               We scale the CSS display size to fit, preserving aspect ratio.
+               style.setProperty(...,'important') overrides the stylesheet !important rule.
+               getBoundingClientRect() returns scaled px so GM touch coords stay correct. */
+            (function() {
+              var c = document.getElementById('canvas');
+              if (!c) return;
+              function fitCanvas() {
+                var c2 = document.getElementById('canvas');
+                if (!c2) return;
+                var cw = c2.width, ch = c2.height;
+                if (!cw || !ch) return;
+                /* Use screen dimensions (not innerWidth/Height which shrink under Safari chrome) */
+                var vw = Math.max(window.innerWidth,  screen.width  > screen.height ? screen.height : screen.width);
+                var vh = Math.max(window.innerHeight, screen.width  > screen.height ? screen.width  : screen.height);
+                /* Actually use the layout viewport to avoid overshooting visible area */
+                vw = window.innerWidth;
+                vh = window.innerHeight;
+                var scale = Math.min(vw / cw, vh / ch);
+                if (scale < 0.999) {
+                  c2.style.setProperty('width',  Math.round(cw * scale) + 'px', 'important');
+                  c2.style.setProperty('height', Math.round(ch * scale) + 'px', 'important');
+                  _rb('canvas fit: ' + cw + 'x' + ch + ' → ' + Math.round(cw*scale) + 'x' + Math.round(ch*scale) + ' (scale ' + scale.toFixed(3) + ')');
+                } else {
+                  c2.style.setProperty('width',  'auto', 'important');
+                  c2.style.setProperty('height', 'auto', 'important');
+                  _rb('canvas fit: ' + cw + 'x' + ch + ' fits viewport ' + vw + 'x' + vh + ' — no scale');
+                }
+              }
+              /* run shortly after GM sets initial canvas dimensions */
+              setTimeout(fitCanvas, 300);
+              setTimeout(fitCanvas, 1000);
+              /* react to GM resizing the canvas (e.g. window rotate) */
+              var _mo = new MutationObserver(fitCanvas);
+              _mo.observe(c, { attributes: true, attributeFilter: ['width', 'height'] });
+              window.addEventListener('resize', fitCanvas);
+            })();
+            /* --- WebGL / game-state diagnostic --- */
+            try {
+              var p = (typeof _P96 !== "undefined") ? _P96 : "UNDEF";
+              var m = (typeof _m03 !== "undefined") ? (_m03 ? "OK" : "NULL") : "UNDEF";
+              var of5 = (typeof _of5 !== "undefined") ? _of5 : "UNDEF";
+              var rg = (typeof _Rg5 !== "undefined") ? _Rg5 : "UNDEF";
+              var sg = (typeof _Sg5 !== "undefined") ? _Sg5 : "UNDEF";
+              var qn = (typeof _qN3 !== "undefined") ? _qN3 : "UNDEF";
+              var qg = (typeof _Qg5 !== "undefined") ? _Qg5 : "UNDEF";
+              _rb("STATE: _P96="+p+" _of5="+of5+" _m03="+m);
+              _rb("ASSETS: _qN3="+qn+" _Qg5="+qg+" (imgs/snd)");
+              _rb("EXTS: _Rg5="+rg+" _Sg5="+sg+" (scripts req/done)");
+              /* monkey-patch _6i5 to catch the exception that's freezing state 1 */
+              if (typeof _6i5 === "function") {
+                var _orig_6i5 = _6i5;
+                window._6i5 = _6i5 = function() {
+                  try {
+                    var r = _orig_6i5.apply(this, arguments);
+                    _rb("_6i5 OK");
+                    return r;
+                  } catch(e) {
+                    _rb("_6i5 THREW: " + e + (e && e.stack ? " | " + e.stack.split("\n").slice(0,3).join(" ") : ""));
+                    throw e;
+                  }
+                };
+              }
+              /* monkey-patch _7a6 (rAF state machine) to catch swallowed errors */
+              if (typeof _7a6 === "function") {
+                var _orig_7a6 = _7a6;
+                var _7a6_errCount = 0;
+                var _7a6_scheduled = false;
+                window._7a6 = _7a6 = function(ts) {
+                  _7a6_scheduled = false;
+                  try {
+                    return _orig_7a6.apply(this, [ts]);
+                  } catch(e) {
+                    _7a6_errCount++;
+                    if (_7a6_errCount <= 3) {
+                      var info = { message: e && e.message, count: _7a6_errCount };
+                      try { info.stacktrace = (e && e.stack ? e.stack.split("\n").slice(1,8).map(function(s){return s.trim();}) : []); } catch(_){}
+                      _rb("_7a6 THREW: " + JSON.stringify(info));
+                    }
+                    /* reschedule ONLY if no loop is already running — prevents stacking */
+                    if (!_7a6_scheduled) {
+                      _7a6_scheduled = true;
+                      window.requestAnimationFrame(_7a6);
+                    }
+                  }
+                };
+              }
+              /* poll every second */
+              var _pollCount = 0;
+              var _poller = setInterval(function(){
+                _pollCount++;
+                var pp = (typeof _P96 !== "undefined") ? _P96 : "?";
+                var rr = (typeof _Rg5 !== "undefined") ? _Rg5 : "?";
+                var ss = (typeof _Sg5 !== "undefined") ? _Sg5 : "?";
+                _rb(_pollCount+"s: _P96="+pp+" Rg5="+rr+" Sg5="+ss);
+                if (pp >= 2 || _pollCount >= 15) clearInterval(_poller);
+              }, 1000);
+            } catch(de) { _rb("diag threw: "+de); }
+          } catch(e) { _rb("GameMaker_Init THREW: " + e); }
+          if (touch) tip();
+        }
         var touch = matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
+        _rb("touch=" + touch + " orientation=" + (screen.orientation ? screen.orientation.type : matchMedia("(orientation: portrait)").matches ? "portrait" : "landscape"));
         if (!touch) return start();
-        var upright = matchMedia("(orientation: portrait)");
-        function next() { if (!upright.matches || body.classList.contains("rb-upright")) start(); }
-        upright.addEventListener ? upright.addEventListener("change", next) : upright.addListener(next);
-        document.getElementById("rbUpright").addEventListener("click", function () { setTimeout(next, 0); });
-        next();
+        /* iOS HTTPS requires a user gesture before WebGL init */
+        var tap = document.createElement("div");
+        tap.id = "rbTap";
+        tap.style.cssText = "position:fixed;inset:0;z-index:9999999;background:#2c68ff;display:flex;align-items:center;justify-content:center;font-family:'Silkscreen','Courier New',monospace;color:#fff;font-size:8vmin;font-weight:700;letter-spacing:.3em;text-shadow:4px 4px 0 #0b1f6b;cursor:pointer;-webkit-tap-highlight-color:transparent;";
+        tap.innerHTML = "TAP TO PLAY";
+        document.body.appendChild(tap);
+        function unlockAudio() {
+          /* Fire synthetic touch events on body so GameMaker's own AudioContext
+             unlock listener (_vL3/_yL3) triggers while we're still in the
+             user-gesture stack. Also call resume() directly as a belt+suspenders. */
+          try {
+            if (typeof g_WebAudioContext !== "undefined" && g_WebAudioContext) {
+              _rb("AudioCtx state before resume: " + g_WebAudioContext.state);
+              g_WebAudioContext.resume().then(function(){ _rb("AudioCtx resumed ok"); }).catch(function(e){ _rb("AudioCtx resume err: "+e); });
+            } else { _rb("g_WebAudioContext not defined yet"); }
+          } catch(e) { _rb("unlockAudio resume threw: "+e); }
+          try {
+            var t0 = new Touch({ identifier: Date.now(), target: document.body, clientX: 1, clientY: 1, radiusX: 1, radiusY: 1, rotationAngle: 0, force: 1 });
+            var ev0 = new TouchEvent("touchstart", { cancelable: true, bubbles: true, touches: [t0], targetTouches: [t0], changedTouches: [t0] });
+            document.body.dispatchEvent(ev0);
+            var ev1 = new TouchEvent("touchend", { cancelable: true, bubbles: true, touches: [], targetTouches: [], changedTouches: [t0] });
+            document.body.dispatchEvent(ev1);
+            _rb("synthetic touch fired on body");
+          } catch(e) {
+            _rb("Touch dispatch err: "+e);
+            /* fallback: fire pointerdown+pointerup in case Touch constructor fails */
+            try {
+              document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+              document.body.dispatchEvent(new PointerEvent("pointerup",   { bubbles: true, cancelable: true }));
+              _rb("pointer fallback fired");
+            } catch(e2) { _rb("pointer fallback also threw: "+e2); }
+          }
+        }
+        function onTap() {
+          _rb("TAP received");
+          tap.remove();
+          var upright = matchMedia("(orientation: portrait)");
+          _rb("portrait=" + upright.matches + " rb-upright=" + body.classList.contains("rb-upright"));
+          function next() {
+            _rb("next() called, portrait=" + upright.matches + " rb-upright=" + body.classList.contains("rb-upright"));
+            if (!upright.matches || body.classList.contains("rb-upright")) {
+              start();
+              /* Unlock audio AFTER GameMaker_Init registers its body touch listener */
+              setTimeout(unlockAudio, 0);
+            }
+          }
+          upright.addEventListener ? upright.addEventListener("change", next) : upright.addListener(next);
+          document.getElementById("rbUpright").addEventListener("click", function () { setTimeout(next, 0); });
+          next();
+        }
+        tap.addEventListener("touchend", function(e) { e.preventDefault(); onTap(); });
+        tap.addEventListener("click", onTap);
         function tip() {
           var standalone = matchMedia("(display-mode: fullscreen), (display-mode: standalone)").matches || navigator.standalone === true;
           if (standalone) return;
