@@ -781,20 +781,69 @@
     if (r.morale) { each(m => { m.attitude = 100; }); given.push("Everyone's morale maxed"); }
     if (r.maxstats) { each(m => { for (const [k] of STATS) { m[k] = 10; m["max_" + k] = 10; } }); given.push("Everyone's stats maxed"); }
     if (r.godmode) {
-      /* Max all stats + potential for every player */
+      /* Max all stats + potential for every player already on roster */
       each(m => {
         for (const [k] of STATS) { m[k] = 10; m["max_" + k] = 10; }
-        /* Full health, max morale, no injury */
         if (typeof m.condition === "number") m.condition = 100;
         m.injury_week = 0; m.resting = 0; m.attitude = 100;
       });
-      /* Max coach credits so roster moves are free */
+
+      /* Fill missing roster spots with godmode players.
+         Standard full Retro Bowl depth chart: 1 QB, 2 RB, 2 TE, 4 WR, 5 OL, 4 DL, 3 LB, 3 DB, 1 P, 1 K */
+      const DEPTH = COLLEGE
+        ? { 1:1, 2:2, 3:2, 4:4, 5:5, 6:4, 7:3, 8:3, 9:0, 10:1 }   /* college — no K */
+        : { 1:1, 2:2, 3:2, 4:4, 5:5, 6:4, 7:3, 8:2, 9:1, 10:1, 11:1 }; /* Retro Bowl */
+
+      /* Name banks so generated players feel real, not like "Player 1" */
+      const FNAMES = ["Marcus","Jordan","DeShawn","Tyrell","Andre","Darnell","Malik","Jamal","Carlos","Devon","Isaiah","Kendrick","Darius","Travon","Elijah","Cameron","Brandon","Xavier","Rashad","Latrell"];
+      const LNAMES = ["Johnson","Williams","Davis","Brown","Jackson","Thomas","White","Harris","Martin","Garcia","Robinson","Lewis","Clark","Walker","Hall","Allen","Young","Hernandez","King","Wright"];
+      let rng = roster.length * 7 + 13; /* deterministic seed so names are consistent */
+      const rand = () => { rng = (rng * 1664525 + 1013904223) & 0xffffffff; return (rng >>> 0) / 0xffffffff; };
+      const pick = arr => arr[Math.floor(rand() * arr.length)];
+
+      /* Base template: clone from an existing player to inherit save-data shape */
+      const baseTemplate = roster.find(r => r.map) ? JSON.parse(JSON.stringify(roster.find(r => r.map).map)) : null;
+      if (baseTemplate) {
+        /* Count how many of each position we already have */
+        const have = {};
+        roster.forEach(x => { if (x.map) { const p = Number(x.map.position); have[p] = (have[p] || 0) + 1; } });
+
+        let filled = 0;
+        for (const [posStr, need] of Object.entries(DEPTH)) {
+          const pos = Number(posStr);
+          const have_n = have[pos] || 0;
+          for (let i = have_n; i < need; i++) {
+            const p = JSON.parse(JSON.stringify(baseTemplate));
+            /* Clear special tokens and stat history */
+            delete p[STAR_KEY];
+            for (const k of Object.keys(p)) if (/^(stat|season|career)_/.test(k) && typeof p[k] === "number") p[k] = 0;
+            for (const k of ["injury_week","resting","xp","xp_gain"]) if (k in p) p[k] = 0;
+            /* Assign position, godmode stats, name, age */
+            Object.assign(p, {
+              position: pos,
+              fname: pick(FNAMES), lname: pick(LNAMES),
+              age: 20 + Math.floor(rand() * 8),
+              skill: 10, speed: 10, strength: 10, stamina: 10,
+              max_skill: 10, max_speed: 10, max_strength: 10, max_stamina: 10,
+              condition: 100, attitude: 100,
+              contract: 1, salary: 1, skill_points: 0,
+              /* randomise face so they don't all look identical */
+              face_x: Math.floor(rand() * 8), face_y: Math.floor(rand() * 8), skin: Math.floor(rand() * 4)
+            });
+            roster.push({ map: p });
+            filled++;
+          }
+        }
+        if (filled) given.push("Filled " + filled + " empty roster spot" + (filled === 1 ? "" : "s") + " with godmode players");
+      }
+
+      /* Max coach credits */
       if (game && game.vals.coach_credit !== undefined) {
         game.vals.coach_credit = String(Math.min(num(game.vals.coach_credit) + 999999, 9999999));
       }
-      /* Crank speedx to 15 (max allowed) — makes QB and all runners blazing fast in-match */
+      /* Crank speedx to 15 (max) — everyone including QB runs like a missile in-match */
       try { $ls.set(SPEEDX_KEY, "15"); } catch(_) {}
-      given.push("GODMODE: everyone 5-star, everyone healed & maxed morale, QB speed cranked to max, +999,999 coach credits");
+      given.push("GODMODE: everyone 5-star, healed & maxed morale, QB speed cranked to max, +999,999 coach credits");
     }
     for (const c of r.custom || []) {
       if (!c.k || !num(c.v) || game.vals[c.k] === undefined || !/^-?\d+(\.\d+)?$/.test(game.vals[c.k])) continue;
