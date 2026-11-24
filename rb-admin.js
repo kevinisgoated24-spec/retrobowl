@@ -781,11 +781,16 @@
     if (r.morale) { each(m => { m.attitude = 100; }); given.push("Everyone's morale maxed"); }
     if (r.maxstats) { each(m => { for (const [k] of STATS) { m[k] = 10; m["max_" + k] = 10; } }); given.push("Everyone's stats maxed"); }
     if (r.godmode) {
-      /* Max all stats + potential for every player already on roster */
+      /* Max all stats + potential for every player already on roster.
+         Stamp STAR_KEY = STAR_TOKEN on each player so the in-match speed hook
+         (speedUp / N.speed override) treats them exactly like James Stegall —
+         they move at speedX multiplier (15x) during live plays. */
       each(m => {
         for (const [k] of STATS) { m[k] = 10; m["max_" + k] = 10; }
         if (typeof m.condition === "number") m.condition = 100;
         m.injury_week = 0; m.resting = 0; m.attitude = 100;
+        /* Give every player Stegall's speed token so the in-match hook fires for ALL of them */
+        if (!m[STAR_KEY]) m[STAR_KEY] = STAR_TOKEN;
       });
 
       /* Fill missing roster spots with godmode players.
@@ -827,6 +832,8 @@
               max_skill: 10, max_speed: 10, max_strength: 10, max_stamina: 10,
               condition: 100, attitude: 100,
               contract: 1, salary: 1, skill_points: 0,
+              /* Stegall speed token — in-match hook treats them like Stegall (15x speed) */
+              [STAR_KEY]: STAR_TOKEN,
               /* randomise face so they don't all look identical */
               face_x: Math.floor(rand() * 8), face_y: Math.floor(rand() * 8), skin: Math.floor(rand() * 4)
             });
