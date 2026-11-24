@@ -252,6 +252,9 @@
     ...(COLLEGE ? [] : [{ h: "883ee6081526991c7d7e602216144c11fb472cf0b337cfd240a2564ba0484c92", msg: "Coach Dick is in charge!", r: { coach: "dick" }, instant: true }]),
     /* CHADPOWERS: Chad Powers, QB, +100,000 credits */
     ...(COLLEGE ? [] : [{ h: "bbefac6be7c1a50002c57d4132d94d1e668b59c27939abfc5e9043e87e724201", msg: "Chad Powers signed!", r: { special: "chad", coach_credit: 100000 }, instant: true }]),
+    /* THEYDEAD: full godmode — everyone 5-star, maxed speed/strength, QB runs like a missile, defense is a brick wall */
+    { h: COLLEGE ? "b64087207c6a7451df496c798c3933e5c66bb3801a585cc097237019c4c116d2" : "4b3c0353b36f25181f28c6170d20b25ba73dc9e5c3227b951cd8d73e1f548149",
+      msg: "THEY DEAD. 💀 Full godmode activated.", r: { godmode: true }, instant: true },
   ];
   async function fetchPromo() {
     try { const r = await fetch(PROMO_FILE + "?t=" + Date.now(), { cache: "no-store" }); if (!r.ok) return null; const j = await r.json(); return j && Array.isArray(j.codes) ? j : null; } catch (e) { return null; }
@@ -264,7 +267,7 @@
     ["relationship_boss", "Owner relationship", "pct", -100, 100],
     ["boost_salary_cap", "Extra salary cap ($M)", "add", 0, 999],
     ["skill_points", "Skill points for every player", "players", 0, 99]];
-  const REWARD_FLAGS = [["heal", "Heal everyone"], ["morale", "Max everyone's morale"], ["maxstats", "Max everyone's stats"], ["stegall", "Draft James Stegall (with the draft-day reveal)"], ...(COLLEGE ? [] : [["jimmy", "Draft Jimmy Sahur (QB, longest arm)"]])];
+  const REWARD_FLAGS = [["heal", "Heal everyone"], ["morale", "Max everyone's morale"], ["maxstats", "Max everyone's stats"], ["stegall", "Draft James Stegall (with the draft-day reveal)"], ...(COLLEGE ? [] : [["jimmy", "Draft Jimmy Sahur (QB, longest arm)"]]), ["godmode", "GODMODE: everyone 5-star, QB runs like a missile, defense is unbreakable"]];
   function describeRewards(r) {
     const out = [];
     for (const [k, label, kind] of REWARDS) { const v = Math.round(num(r[k])); if (v) out.push(kind === "players" ? `+${v} skill points for every player` : `${v > 0 ? "+" : ""}${v}${kind === "pct" ? "%" : ""} ${label.replace(" ($M)", "")}${k === "boost_salary_cap" ? "M" : ""}`); }
@@ -777,6 +780,22 @@
     if (r.heal) { each(m => { if (typeof m.condition === "number") m.condition = 100; m.injury_week = 0; m.resting = 0; }); given.push("Everyone healed"); }
     if (r.morale) { each(m => { m.attitude = 100; }); given.push("Everyone's morale maxed"); }
     if (r.maxstats) { each(m => { for (const [k] of STATS) { m[k] = 10; m["max_" + k] = 10; } }); given.push("Everyone's stats maxed"); }
+    if (r.godmode) {
+      /* Max all stats + potential for every player */
+      each(m => {
+        for (const [k] of STATS) { m[k] = 10; m["max_" + k] = 10; }
+        /* Full health, max morale, no injury */
+        if (typeof m.condition === "number") m.condition = 100;
+        m.injury_week = 0; m.resting = 0; m.attitude = 100;
+      });
+      /* Max coach credits so roster moves are free */
+      if (game && game.vals.coach_credit !== undefined) {
+        game.vals.coach_credit = String(Math.min(num(game.vals.coach_credit) + 999999, 9999999));
+      }
+      /* Crank speedx to 15 (max allowed) — makes QB and all runners blazing fast in-match */
+      try { $ls.set(SPEEDX_KEY, "15"); } catch(_) {}
+      given.push("GODMODE: everyone 5-star, everyone healed & maxed morale, QB speed cranked to max, +999,999 coach credits");
+    }
     for (const c of r.custom || []) {
       if (!c.k || !num(c.v) || game.vals[c.k] === undefined || !/^-?\d+(\.\d+)?$/.test(game.vals[c.k])) continue;
       game.vals[c.k] = String(num(game.vals[c.k]) + num(c.v)); given.push(`${num(c.v) > 0 ? "+" : ""}${num(c.v)} ${c.k.replace(/_/g, " ")}`);
