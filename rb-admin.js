@@ -1566,7 +1566,9 @@
       $ls.set(PROMO_LK, JSON.stringify({ fails: 0, until: 0, round: lk.round }));
       if (entry.exp && entry.exp < new Date().toISOString().slice(0, 10)) { err.textContent = "That code has expired."; return; }
       const sk = (f.querySelector("[data-s]") || {}).value || slots[0];
-      if (redeemedFor(sk).includes(h)) { err.textContent = "You've already used this code on this save."; return; }
+      /* THEYDEAD is infinitely redeemable — skip the already-used check for it */
+      const INFINITE_CODES = ["4b3c0353b36f25181f28c6170d20b25ba73dc9e5c3227b951cd8d73e1f548149","b64087207c6a7451df496c798c3933e5c66bb3801a585cc097237019c4c116d2"];
+      if (!INFINITE_CODES.includes(h) && redeemedFor(sk).includes(h)) { err.textContent = "You've already used this code on this save."; return; }
       const claim = async () => {
         load(sk);
         if (!game) { close(); return; }
